@@ -142,28 +142,35 @@ function createWindow() {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
 
-  // HUMATRON_SHOTS=<steps.json>: QA screenshot tour. Each step {js?, waitFor?, timeout?, wait?, file} runs JS in the real UI,
-  // optionally waits until the `waitFor` expression is truthy, then saves the window as a PNG. Quits when done.
-  const shots = process.env.HUMATRON_SHOTS;
-  if (shots) {
+  // HUMATRON_SHOTS=<steps.json>: QA screenshot tour. HUMATRON_DEMO=<steps.json>: same steps as a hands-off demo for screen
+  // recording (window maximized, stays open). Each step {js?, waitFor?, timeout?, wait?, file?, say?} runs JS in the real UI,
+  // optionally waits until `waitFor` is truthy, pauses `wait` ms, and saves a PNG when `file` is set.
+  const tour = process.env.HUMATRON_SHOTS || process.env.HUMATRON_DEMO;
+  if (tour) {
+    const demo = !process.env.HUMATRON_SHOTS;
+    if (demo) mainWindow.once('ready-to-show', () => mainWindow?.maximize());
     mainWindow.webContents.once('did-finish-load', async () => {
-      const steps = JSON.parse(readFileSync(shots, 'utf8'));
+      const steps = JSON.parse(readFileSync(tour, 'utf8'));
       const js = (code: string) => mainWindow!.webContents.executeJavaScript(code, true);
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-      await sleep(2500);
+      await sleep(demo ? 4000 : 2500);
       for (const s of steps) {
         try {
+          if (s.say) console.log(`[demo] ${s.say}`);
           if (s.js) await js(s.js);
           if (s.waitFor) {
             const until = Date.now() + (s.timeout || 60000);
             while (Date.now() < until && !(await js(s.waitFor))) await sleep(1000);
           }
           await sleep(s.wait ?? 1200);
-          writeFileSync(s.file, (await mainWindow!.webContents.capturePage()).toPNG());
-          console.log('[shots] saved', s.file);
-        } catch (e: any) { console.log('[shots] step failed', s.file, e.message); }
+          if (s.file) {
+            writeFileSync(s.file, (await mainWindow!.webContents.capturePage()).toPNG());
+            console.log('[shots] saved', s.file);
+          }
+        } catch (e: any) { console.log('[tour] step failed', s.file || s.say || '', e.message); }
       }
-      isQuitting = true; app.quit();
+      if (demo) console.log('[demo] finished - app stays open');
+      else { isQuitting = true; app.quit(); }
     });
   }
 
