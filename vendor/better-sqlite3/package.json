@@ -1,0 +1,24 @@
+{
+  "name": "better-sqlite3",
+  "version": "13.0.3",
+  "description": "The fastest and simplest library for SQLite in Node.js. (vendored prebuilt copy for Humatron: no native compile on npm install)",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./linux-x64": "./lib/linux-x64.js",
+    "./linux-arm64": "./lib/linux-arm64.js",
+    "./linuxmusl-x64": "./lib/linuxmusl-x64.js",
+    "./linuxmusl-arm64": "./lib/linuxmusl-arm64.js",
+    "./darwin-x64": "./lib/darwin-x64.js",
+    "./darwin-arm64": "./lib/darwin-arm64.js",
+    "./win32-x64": "./lib/win32-x64.js",
+    "./win32-arm64": "./lib/win32-arm64.js",
+    "./package.json": "./package.json"
+  },
+  "gypfile": false,
+  "files": [
+    "lib/**",
+    "prebuilds/**"
+  ]
+}
