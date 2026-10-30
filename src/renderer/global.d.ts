@@ -17,6 +17,7 @@ interface Window {
     conversation: {
       add: (role: string, content: string, metadata?: object) => Promise<{id: number}>;
       getRecent: (limit?: number) => Promise<any[]>;
+      newChat: () => Promise<{ since: number }>;
     };
     tool: {
       log: (tool_name: string, args: object, result?: object, success?: boolean) => Promise<void>;

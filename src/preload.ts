@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   conversation: {
     add: (role: string, content: string, metadata?: object) => ipcRenderer.invoke('conversation:add', role, content, metadata),
     getRecent: (limit?: number) => ipcRenderer.invoke('conversation:getRecent', limit),
+    newChat: () => ipcRenderer.invoke('conversation:new'),
   },
   tool: {
     log: (tool_name: string, args: object, result?: object, success?: boolean) => ipcRenderer.invoke('tool:log', tool_name, args, result, success),

@@ -172,7 +172,9 @@ export function createAgent(store: Store, db: Database.Database, embed: Embedder
     const model = await resolveModel();
     const now = new Date();
     const recalled = await searchMemory(text, 4);
-    const history = (db.prepare('SELECT role, content FROM conversations ORDER BY id DESC LIMIT 12').all() as any[]).reverse();
+    // Only the current chat (see "New chat" in main.ts); long-term facts come from memories, not old chats.
+    const since = Number(store.get('chatSinceId') || 0);
+    const history = (db.prepare('SELECT role, content FROM conversations WHERE id > ? ORDER BY id DESC LIMIT 12').all(since) as any[]).reverse();
     db.prepare('INSERT INTO conversations (role, content, metadata) VALUES (?, ?, ?)').run('user', text, '{}');
     const pad = (n: number) => String(n).padStart(2, '0');
     const system = `You are Humatron, a local-first desktop assistant. Now: ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())} (${now.toDateString()}).

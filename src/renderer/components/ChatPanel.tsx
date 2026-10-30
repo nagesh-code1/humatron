@@ -263,6 +263,24 @@ export function ChatPanel({ brain, visible, onThinking, onModel, goTo }: { brain
     return () => window.removeEventListener('keydown', onKey);
   }, [voicePhase]);
 
+  // New chat: fresh screen and context; memories stay (see conversation:new in main.ts).
+  const newChat = async () => {
+    if (isLoading || voicePhase !== 'off') return;
+    stopSpeaking(); setSpeakingId(null);
+    await window.api.conversation.newChat();
+    setMessages([]); setInput(''); setAtBottom(true);
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  };
+
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); newChat(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [visible, isLoading, voicePhase]);
+
   const toggleSpeak = async (msg: Message) => {
     if (speakingId === msg.id) { stopSpeaking(); setSpeakingId(null); return; }
     const [voiceName, rate] = await Promise.all([window.api.store.get('ttsVoice'), window.api.store.get('ttsRate')]);
@@ -291,6 +309,12 @@ export function ChatPanel({ brain, visible, onThinking, onModel, goTo }: { brain
 
   return (
     <div className="chat-panel">
+      {!empty && (
+        <button className="new-chat-btn" onClick={newChat} disabled={isLoading || voicePhase !== 'off'} title="Start a new chat (Ctrl+N) - memories are kept">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          New chat
+        </button>
+      )}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} role="log" aria-live="polite">
         <div className="chat-column">
           {empty && (

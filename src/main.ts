@@ -529,9 +529,17 @@ ipcMain.handle('conversation:add', async (_, role: string, content: string, meta
   return { id: result.lastInsertRowid };
 });
 
+// "New chat" just moves a marker: messages before it stay saved (and exportable) but are no longer shown or sent to
+// Nemotron. Memories are separate, so a new chat still knows the user.
+const chatSince = () => Number(store.get('chatSinceId') || 0);
 ipcMain.handle('conversation:getRecent', async (_, limit = 50) => {
-  const stmt = db.prepare('SELECT * FROM conversations ORDER BY id DESC LIMIT ?');
-  return stmt.all(limit);
+  const stmt = db.prepare('SELECT * FROM conversations WHERE id > ? ORDER BY id DESC LIMIT ?');
+  return stmt.all(chatSince(), limit);
+});
+ipcMain.handle('conversation:new', async () => {
+  const max = (db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM conversations').get() as any).m;
+  store.set('chatSinceId', max);
+  return { since: max };
 });
 
 // Tool call logging
