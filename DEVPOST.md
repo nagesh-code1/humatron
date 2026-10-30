@@ -1,92 +1,81 @@
-# Devpost Submission — Humatron
+# Devpost submission — Humatron (copy-paste ready)
 
-## Title
-**Humatron — Local-First AI Assistant with Nemotron Reasoning & On-Device Memory**
+**Track:** Personal AI
 
-## Tagline
-Summon Nemotron with Alt+Space. It remembers everything locally. Your data never leaves your machine.
+## Project name
+Humatron
+
+## Elevator pitch (≤200 chars)
+A private, always-on desktop AI powered by NVIDIA Nemotron on Nebius. It remembers you, manages files and calendar, speaks your language, and completes multi-step Missions.
 
 ## Inspiration
-We wanted an AI assistant that actually *stays* on your computer — no cloud sync, no subscription, no data harvesting. The NVIDIA × Nebius hackathon was the perfect excuse to build it: Nemotron models are incredible at reasoning, and Nebius Token Factory makes them accessible. But every "AI assistant" we tried either lived in a browser tab or phoned home. So we built Humatron: a native desktop app where the model is remote (Nebius), but the *mind* — memory, calendar, tools, preferences — is 100% local.
+Most "AI assistants" are a chat box in a browser tab that forgets you the moment you close it. We wanted something closer
+to a real personal assistant: it lives on your desktop, remembers what matters to you, can actually *do* things on your
+PC — and keeps your life on your machine instead of someone else's cloud. In India, people also switch between
+English, Hindi, Kannada and Hinglish in the same sentence, so the assistant had to understand and answer in all of them.
 
-## What It Does
+## What it does
+Humatron is a Windows desktop app (system tray) whose brain is **NVIDIA Nemotron 3 Ultra, served by Nebius Token Factory**.
 
-Humatron is a frameless Electron app that lives in your system tray. Press **Alt+Space** and it appears instantly.
+- **Missions** — give a goal like *"I have my Signals & Systems exam on Monday — make a study plan and book study
+  sessions."* Nemotron plans 3–6 steps, executes each with real tools, and writes a report. You watch it live: a step
+  timeline, tool cards (file written, events added, pages read), a progress bar and the final report.
+- **Long-term memory** — facts you share are stored locally with on-device embeddings and recalled by meaning later,
+  even after a restart.
+- **Hands-on tools** — files (list, search, read, create, move, copy, open; deletes only to the Recycle Bin), calendar,
+  image generation, and **Tavily web research used only when performing an operation** (e.g. finding the real date and
+  venue of an event before scheduling it).
+- **Voice, in your language** — dictate or have a hands-free conversation. Speech is recognised on your PC (Whisper);
+  Humatron replies in the language you used — English, Hindi, Kannada, Tamil, Hinglish…
+- **You own the data** — export everything to JSON or clear it from Settings. No telemetry.
 
-**Core capabilities:**
-- **Chat with Nemotron** — Nebius Token Factory / AI Studio, auto-detects Nemotron Ultra/Super from your account's model list
-- **Local memory with semantic search** — SQLite + MiniLM-L6-v2 embeddings (via `@xenova/transformers`, ONNX, quantized). Tell it "I prefer dark roast coffee" → it remembers. Restart the app, ask "what coffee do I like?" → it recalls via cosine similarity.
-- **Tool-calling agent loop** (`src/agent.ts`) — the model decides when to call `remember`, `recall`, `add_event`, `list_events`. Max 6 rounds per turn. Both user messages and tool results persist in SQLite.
-- **Calendar + desktop notifications** — add events via chat ("remind me tomorrow at 10am"), they appear in the Calendar tab and as native toasts.
-- **Privacy first** — DB at `%APPDATA%\Humatron\humatron.db`, API key encrypted via Windows DPAPI (electron-store). Only `/models` and `/chat/completions` calls leave your machine.
+## How we built it
+- **Electron 45 + React 19 + TypeScript**, Vite for the renderer, esbuild for main/preload; typed `contextBridge` IPC,
+  sandboxed renderer, no `nodeIntegration`.
+- **Nemotron via Nebius Token Factory** (OpenAI-compatible `/v1/chat/completions` with tool calling). Humatron lists the
+  account's models, ranks Nemotron (3 Ultra → Super → Nano) and probes until one answers.
+- **Agent** (`src/agent.ts`): system prompt + recent history + top memories → Nemotron chooses tools (up to 6 rounds) →
+  answer in the user's language.
+- **Missions engine**: Nemotron returns a JSON plan → each step runs its own tool loop and sees earlier results (including
+  which tools already ran, so it doesn't redo work) → Nemotron writes a Markdown report. Events stream to the UI over IPC;
+  missions are stored in SQLite; rate limits pause and resume instead of failing.
+- **Local stack**: better-sqlite3 for memories/chats/calendar/missions; `@xenova/transformers` for MiniLM embeddings and
+  Whisper speech-to-text, both on-device (ONNX).
+- **Tavily** for web research with a per-request budget (2 per chat message, 8 per mission) and a 10-minute cache.
 
-## How We Built It
+## Challenges we ran into
+- **Free-tier rate limits during long missions** — a mission makes many Nemotron calls in a row. We added backoff
+  retries and a visible "pause and resume" so a mission survives a 429 instead of dying halfway.
+- **Agents repeating work** — Nemotron sometimes finished step 3's job during step 2. Feeding each step the list of tools
+  already run fixed duplicate calendar events.
+- **Hinglish speech** — Whisper's auto-detect turns mixed Hindi-English into Devanagari; a "Hinglish" mode keeps it in
+  readable Roman letters.
+- **Safety on a real file system** — every path is resolved and checked; system folders are refused, overwrites need
+  explicit permission and deletes go to the Recycle Bin.
 
-| Layer | Tech |
-|-------|------|
-| **UI** | React 19 + TypeScript, Vite, custom CSS variables (sea-blue theme) |
-| **Shell** | Electron 45, frameless window, custom titlebar, system tray, global shortcut |
-| **Storage** | better-sqlite3 (conversations, memories, calendar, tool logs), electron-store (encrypted settings) |
-| **Embeddings** | @xenova/transformers — MiniLM-L6-v2, runs locally, no GPU needed |
-| **Model** | Nebius OpenAI-compatible API — Nemotron 3 Ultra / Super, auto-resolved from `/models` |
-| **Agent** | `src/agent.ts` — system prompt + history + memory search → tool calls → answer |
-| **Build** | esbuild (main/preload) + Vite (renderer), Electron Forge (Squirrel installer) |
+## Accomplishments that we're proud of
+- Missions that genuinely *do* things: in testing, Nemotron 3 Ultra planned an exam schedule, saved a study-plan file and
+  created two calendar events by itself.
+- Voice recognition that works without sending audio anywhere.
+- Answers in the user's own language — Kannada in, Kannada out.
 
-**Key implementation details:**
-- `createAgent(store, db, embed, toolLog)` factory — pure functions, testable, no global state
-- `resolveModel()` hits `/models`, picks Nemotron Ultra > Super > first Nemotron, caches result
-- `chat()` injects relevant memories (top-4 cosine similarity) + last 12 conversation turns into system prompt
-- Tool schema: `remember(content)`, `recall(query)`, `add_event(title, start, end?, description?)`, `list_events(date)`
-- Preload exposes only typed IPC: `chat`, `memory.search`, `calendar.*`, `window.*` — no `nodeIntegration`
+## What we learned
+- Nemotron 3 Ultra is strong at planning and tool use when each step gets a tight, specific prompt.
+- Long-running agents need visible progress and graceful recovery more than they need speed.
+- Local-first and cloud-model can coexist: keep the *memory* on the device, send only what the model needs.
 
-## Challenges We Ran Into
+## What's next
+- Streaming responses and faster Nemotron variants for quick chats (Ultra for Missions).
+- Scheduled / recurring Missions (e.g. a daily morning brief).
+- NVIDIA speech models for voice, and macOS/Linux builds.
 
-1. **Unsigned Windows installer blocked by Smart App Control** — Electron Forge Squirrel output isn't code-signed. Workaround: run from source (`npm start`) for demo. Documented in README.
-2. **Nebius host migration** — AI Studio → Token Factory. Agent tries both hosts, caches the working one.
-3. **MiniLM in Electron renderer vs main** — Embeddings run in main process (Node) via `@xenova/transformers`; renderer only sends text via IPC. Avoided WebAssembly issues in sandboxed renderer.
-4. **Tool-calling model compatibility** — Not all Nemotron variants support `tools` parameter. Agent detects failure, falls back to plain chat automatically.
-5. **Context isolation + contextBridge typing** — Added `src/renderer/global.d.ts` for `window.api` autocomplete.
+## Built with
+nvidia-nemotron, nebius-token-factory, electron, react, typescript, vite, esbuild, sqlite, better-sqlite3,
+transformers.js, whisper, tavily, node.js
 
-## Accomplishments We're Proud Of
+## Try it out
+- GitHub: https://github.com/<your-account>/humatron  *(fill in after pushing)*
+- Run: `npm install && npm start`, then paste a Nebius Token Factory key in Settings.
 
-- **Zero-cloud memory** — semantic recall works after full app restart, no vector DB server needed
-- **Sub-200MB installer** — Electron + Node + deps, single `.exe` via Squirrel
-- **Alt+Space muscle memory** — global hotkey + frameless window feels native, not "web app in a box"
-- **Agent loop in ~150 lines** — `src/agent.ts` is readable, no framework bloat
-- **Cross-host Nebius support** — gracefully handles Token Factory / AI Studio migration
-
-## What We Learned
-
-- Local embeddings (MiniLM) are fast enough for ~10k memories on CPU — no need for pgvector/Chroma/Weaviate on desktop
-- Electron Forge + Vite plugin + esbuild = clean separation: renderer builds to `dist/renderer`, main/preload to `dist/main` & `dist/preload`
-- `electron-store` uses OS credential store (DPAPI on Windows) — API keys actually encrypted at rest
-- Tool-calling models need tight system prompts: "call remember whenever user shares a lasting fact" works better than "you can use tools"
-
-## What's Next
-
-- **Streaming responses** — Nebius supports SSE; render tokens as they arrive
-- **More tools** — file read/write, shell, web search, code execution (sandboxed)
-- **Plugin system** — community skills as JSON, hot-loadable
-- **macOS / Linux builds** — Forge makers configured, needs CI
-- **Code signing** — GitHub Actions + Windows cert for Smart App Control
-- **Model quantization options** — let users pick Nemotron 3 Ultra 4-bit for lower latency
-
-## Built With
-
-- **NVIDIA Nemotron** (via Nebius Token Factory / AI Studio)
-- **Nebius** — serverless inference, OpenAI-compatible API
-- **Electron** — native desktop shell
-- **React 19** — UI
-- **TypeScript** — type safety across main/preload/renderer
-- **Vite** — fast renderer builds
-- **esbuild** — instant main/preload bundles
-- **better-sqlite3** — fast local SQL
-- **@xenova/transformers** — MiniLM-L6-v2 embeddings (ONNX, quantized)
-- **electron-store** — encrypted settings (DPAPI / Keychain / libsecret)
-- **auto-launch** — start on login
-- **Electron Forge** — packaging (Squirrel, DMG, DEB, RPM)
-
----
-
-**Repository:** (private until Devpost submission approved)  
-**Demo:** Run `npm start` — press Alt+Space, add Nebius key in Settings, try "Remember I like dark roast coffee", restart, ask "What coffee do I like?"
+## Video
+YouTube link (unlisted is fine), under 3 minutes — see `DEMO_SCRIPT.md`.

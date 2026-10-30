@@ -53,7 +53,8 @@ export function MemoryViewer() {
   };
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+    // SQLite CURRENT_TIMESTAMP is UTC without a zone marker.
+    const date = new Date(/Z|[+-]\d\d:?\d\d$/.test(dateStr) ? dateStr : dateStr.replace(' ', 'T') + 'Z');
     return date.toLocaleString();
   };
 
@@ -63,7 +64,7 @@ export function MemoryViewer() {
         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
           <div>
             <h1 className="panel-title">Memory</h1>
-            <p className="panel-subtitle">Local-first storage with vector search (coming soon)</p>
+            <p className="panel-subtitle">Everything Humatron has learned about you — stored on this PC, searched by meaning</p>
           </div>
           <button className="btn btn-primary" onClick={handleAddMemory} style={{padding: '8px 16px'}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '6px', verticalAlign: 'middle'}}>

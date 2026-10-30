@@ -1,99 +1,93 @@
 # Humatron
 
-**Local-first AI desktop assistant** powered by NVIDIA Nemotron (via Nebius or NVIDIA build). Memory, chats and calendar stay on your machine — only model API calls leave your device.
+**A private, always-on personal AI for your desktop — powered by NVIDIA Nemotron on Nebius Token Factory.**
 
-## What It Does
+Humatron lives in your system tray. It remembers what matters to you, manages your files and calendar, talks in your
+language, and carries out multi-step **Missions** — while your memories, chats, files and calendar stay on your PC.
 
-Humatron is a local-first AI assistant that lives in your system tray (Alt+Space to summon). It combines:
+> Built for the **Nebius × NVIDIA Global AI Hackathon 2026** — track: **Personal AI**
+> (*"A private, always-on assistant with memory, reusable skills, and user-controlled tools."*)
 
-- **Nemotron reasoning** via Nebius Token Factory or NVIDIA build (auto-detects a working Nemotron model, Nemotron 3 Ultra first). Google Gemini and Groq are available as free fallbacks.
-- **Persistent local memory** — SQLite + on-device MiniLM embeddings (via `@xenova/transformers`) for semantic recall across restarts
-- **Tool-calling agent loop** (`src/agent.ts`) — remembers facts, recalls them, adds/lists calendar events, all without leaving your machine
-- **Calendar** — events stored locally, created and queried by the agent in plain language
+## What it does
+
+| | |
+|---|---|
+| 🧠 **Nemotron brain** | Every answer and decision comes from **NVIDIA Nemotron** (Nemotron 3 Ultra first) via **Nebius Token Factory**'s OpenAI-compatible API. An NVIDIA build (`nvapi-`) key also works for development. |
+| 🎯 **Missions** | Give a goal ("prepare me for Monday's exam"). Nemotron **plans** 3–6 steps, **executes** each one with real tools, and writes a **report** — shown live as a step timeline. |
+| 💾 **Local memory** | Facts you share are saved in SQLite with on-device MiniLM embeddings and recalled by meaning in later chats — across restarts. |
+| 📂 **File management** | List, search, read, create, move, copy, open files and folders. Deletes go to the **Recycle Bin** only; system folders are blocked. |
+| 📅 **Calendar** | Add and check events in plain language; month view in the app. |
+| 🌐 **Web research (Tavily)** | Optional. Used **only to perform operations** — research steps in Missions, or when a request (e.g. scheduling an event) needs real-world facts. Capped per request and cached. |
+| 🎙️ **Voice** | Dictate, or talk hands-free in voice mode. Speech recognition runs **on your PC** (Whisper via transformers.js); replies are spoken with Windows voices. |
+| 🌍 **Any language** | Write or speak English, Hindi, Kannada, Tamil, Telugu, Hinglish… Humatron replies in the same language. |
+| 🎨 **Images** | "Make an image of…" → generated and saved to `Pictures\Humatron`. |
+| 🔒 **Your data** | Export everything to JSON or clear it from Settings. No telemetry, no cloud sync. |
+
+## How Nemotron is used
+
+Nemotron is not a chat add-on here — it is the agent's reasoning core:
+
+1. **Chat agent** (`src/agent.ts → chat`): relevant local memories + recent history go into the system prompt; Nemotron
+   decides which tools to call (up to 6 rounds), then answers in the user's language.
+2. **Missions** (`src/agent.ts → mission`): Nemotron returns a JSON plan, then runs each step with tool calls, seeing what
+   earlier steps produced (and which tools already ran, so it doesn't repeat work), and finally writes a Markdown report.
+   Progress streams to the UI over IPC. Rate limits pause and resume the mission instead of failing it.
+3. **Model selection**: Humatron lists the account's models, ranks Nemotron (3 Ultra → Super → Nano) and probes until
+   one answers; the choice is cached.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Electron Main (dist/main/main.cjs)                         │
-│  - BrowserWindow, tray, global hotkey, IPC                 │
-│  - better-sqlite3 DB at %APPDATA%\Humatron\humatron.db     │
-│  - electron-store JSON for provider, API keys, settings    │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ contextBridge (preload)
-┌──────────────────────────▼──────────────────────────────────┐
-│  React Renderer (dist/renderer)                             │
-│  - Chat, Memory, Calendar, Settings tabs                   │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ IPC: chat, memory, calendar
-┌──────────────────────────▼──────────────────────────────────┐
-│  Agent Loop (src/agent.ts)                                  │
-│  - resolveModel() → ranks /models, probes until one answers │
-│  - chat() → system prompt + recent history + memory search  │
-│  - tool calls: remember, recall, add_event, list_events    │
-│  - max 6 tool rounds per turn                               │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ local embeddings
-┌──────────────────────────▼──────────────────────────────────┐
-│  @xenova/transformers (MiniLM-L6-v2, ONNX, quantized)       │
-│  - cosine similarity search in SQLite                       │
-└─────────────────────────────────────────────────────────────┘
+React renderer (Chat · Missions · Memory · Calendar · Skills · Settings)
+        │  contextBridge IPC (typed, no nodeIntegration, sandboxed)
+Electron main ── better-sqlite3 (%APPDATA%\Humatron\humatron.db)
+        │        electron-store (settings + API keys, local JSON)
+        ├── src/agent.ts   Nemotron client (Nebius Token Factory / NVIDIA build), chat loop, Missions engine
+        ├── src/skills.ts  file tools, image tool, Tavily web_search / read_webpage
+        └── src/voice.ts   local Whisper speech-to-text (transformers.js, ONNX)
 ```
 
 ## Setup
 
-### Prerequisites
-- Node.js 22+
-- An API key from **one** provider:
+**Prerequisites:** Windows 10/11, Node.js 22+, a **Nebius Token Factory** API key (or an NVIDIA build `nvapi-` key).
+Optional: a **Tavily** key for web research.
 
-| Provider | Model | Cost | Get a key |
-|---|---|---|---|
-| NVIDIA build *(default)* | Nemotron 3 Ultra / 3.5 Lightning | Free tier, no card | [build.nvidia.com](https://build.nvidia.com) → open a Nemotron model → Get API Key |
-| Nebius Token Factory | Nemotron | Credits (hackathon promo or card) | [tokenfactory.nebius.com](https://tokenfactory.nebius.com) |
-| Google Gemini | Gemini Flash | Free tier, no card | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| Groq | Llama 3.3 70B | Free tier, no card | [console.groq.com/keys](https://console.groq.com/keys) |
-
-### Development (run from source — avoids Windows Smart App Control)
 ```bash
-git clone <repo-url> humatron
+git clone https://github.com/<your-account>/humatron.git
 cd humatron
 npm install
-npm run build          # or: node build.mjs
-npm start              # node build.mjs && electron .
+npm start            # builds (node build.mjs) and launches Electron
 ```
 
-### Connect a Model
-1. Open Humatron (Alt+Space)
-2. Go to **Settings** → **AI Brain** → pick a **Provider**
-3. Paste your API key → **Save & test connection**
-4. Leave Model on **Auto**: Humatron lists the provider's models, ranks them (Nemotron 3 Ultra first) and uses the first one that actually answers. Pick `nemotron-3.5-lightning` for faster replies.
+Then in the app:
 
-The first chat also downloads the small local embedding model (MiniLM, ~25 MB) into `%APPDATA%\Humatron\models`; after that, memory search works offline.
+1. **Settings → AI Brain → Nemotron API key**: paste your Nebius Token Factory key (the badge shows
+   *"Nebius Token Factory ✓ hackathon-ready"*), leave the model on **Auto**, click **Save & test connection**.
+2. *(Optional)* **Settings → Web search · Tavily**: paste a `tvly-` key and click **Test**.
+3. Try **Chat** ("Remember that I'm vegetarian") or a **Mission** from the examples.
 
-### Verified
-Tested 2026-10-30 on Windows 11 with `nvidia/nemotron-3-ultra-550b-a55b`: the agent called `remember` + `add_event`, then answered a follow-up with `recall` + `list_events`; memories survived a full app restart.
+First use of voice downloads the Whisper base model (~100 MB) into `%APPDATA%\Humatron\models`; memory embeddings
+(MiniLM, ~25 MB) download on first chat. After that both run offline.
 
-### Packaging (Windows installer)
-```bash
-npm run package
-# Output: out/Humatron-win32-x64/
-# Note: unsigned .exe may be blocked by Windows Smart App Control.
-# Prefer running from source for the hackathon demo.
-```
+**Packaging:** `npm run package` → `out/Humatron-win32-x64/`. The unsigned `.exe` may be blocked by Windows Smart App
+Control; running from source avoids that.
 
 ## Privacy
 
-- **All data stays in `%APPDATA%\Humatron`** (e.g., `C:\Users\<you>\AppData\Roaming\Humatron\humatron.db`)
-- API keys are stored only on this PC in `%APPDATA%\Humatron\humatron-config.json` (plain JSON, never in the repo)
-- Only model API calls (`/models`, `/chat/completions`) to the provider you picked leave your machine
-- The agent's tools are deliberately safe: memory and calendar only (no shell, no file deletion)
-- No telemetry, no analytics, no cloud sync
+- Memories, chats, calendar, skills and missions: `%APPDATA%\Humatron\humatron.db` on your PC.
+- API keys: stored only in `%APPDATA%\Humatron\humatron-config.json` (local, plain JSON — never committed, never exported).
+- What leaves your PC: requests to Nemotron (Nebius / NVIDIA), Tavily searches when web research is enabled, and
+  image descriptions sent to the image service. Voice is transcribed locally.
+- No shell tool; file deletes go to the Recycle Bin; `C:\Windows`, `Program Files`, `ProgramData` are refused.
 
-## Known Issue
+## Testing done
 
-**Windows Smart App Control / SmartScreen** may block the unsigned packaged `.exe`.
-**Workaround:** run from source (`npm start`) for the demo. The installed app works if you allow it in Windows Security.
+- Live on **NVIDIA Nemotron 3 Ultra** (`nvidia/nemotron-3-ultra-550b-a55b`): chat with tools; a Mission planned an exam
+  schedule, saved a study-plan file and created two calendar events.
+- File tools: 12 automated checks (create/read/move/copy/search/recycle, overwrite refusal, blocked system paths).
+- Local Whisper: English sentence transcribed exactly in ~3 s after the one-time model download.
+- Multilingual: Kannada and Hindi prompts answered in the same language.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Author: Nagesh (2026).
+MIT — see [LICENSE](LICENSE). © 2026 Nagesh.

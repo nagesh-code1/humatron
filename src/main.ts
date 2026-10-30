@@ -1,10 +1,12 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, nativeImage, shell, dialog } from 'electron';
 import { join } from 'path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, copyFileSync, unlinkSync, rmSync } from 'fs';
 import Store from 'electron-store';
 import Database from 'better-sqlite3';
 import AutoLaunch from 'auto-launch';
 import { createAgent } from './agent';
+import { createSkills, resolveUserPath } from './skills';
+import { transcribe } from './voice';
 
 // Same data folder in dev and in the packaged app: %APPDATA%/Humatron (memories, chats, settings stay on this PC)
 app.setName('Humatron');
@@ -505,16 +507,86 @@ ipcMain.handle('tool:log', async (_, tool_name: string, args: object, result?: o
   stmt.run(tool_name, JSON.stringify(args), JSON.stringify(result || {}), success ? 1 : 0);
 });
 
+// Files, images and web search tools (src/skills.ts), shared by chat and missions.
+const skills = createSkills({
+  trash: p => shell.trashItem(p),
+  openPath: p => shell.openPath(p),
+  imagesDir: join(app.getPath('pictures'), 'Humatron'),
+  store: store as any,
+});
+ipcMain.handle('web:test', () => skills.webTest());
+
 // Nebius / Nemotron + tool-calling agent (src/agent.ts)
 const agent = createAgent(store as any, db, async (text: string) => {
   try { const pipe = await getEmbedder(); return (await pipe(text, { pooling: 'mean', normalize: true })).data as Float32Array; }
   catch (e: any) { console.log('[embed] unavailable, using keyword search:', String(e?.stack || e?.message || e).slice(0, 600)); return null; }
-}, toolLog);
+}, toolLog, skills);
 ipcMain.handle('nebius:chat', async (_, messages: Array<{role: string, content: string}>) =>
   agent.nebiusFetch('/chat/completions', { method: 'POST', body: JSON.stringify({ model: await agent.resolveModel(), messages, max_tokens: 2048 }) }));
 ipcMain.handle('nebius:test', () => agent.test());
 ipcMain.handle('nebius:models', () => agent.models());
-ipcMain.handle('agent:chat', (_, text: string) => agent.chat(text));
+ipcMain.handle('agent:chat', (_, text: string, opts?: object) => agent.chat(text, opts || {}));
+
+// Missions: Nemotron plans + executes multi-step goals; progress streams to the window as 'mission:event'.
+ipcMain.handle('mission:start', (_, goal: string) => agent.mission(goal, ev => mainWindow?.webContents.send('mission:event', ev)));
+ipcMain.handle('mission:cancel', (_, id: number) => agent.cancelMission(id));
+ipcMain.handle('mission:list', () => agent.listMissions());
+ipcMain.handle('mission:get', (_, id: number) => agent.getMission(id));
+
+// Voice: renderer records + resamples to 16 kHz mono PCM, main transcribes with Whisper on this PC.
+ipcMain.handle('voice:transcribe', (_, pcm: Float32Array) => transcribe(pcm, store as any, app.getPath('userData')));
+
+// Files the assistant produced (images) - open, or show in Explorer.
+ipcMain.handle('files:open', async (_, p: string) => shell.openPath(resolveUserPath(p)));
+ipcMain.handle('files:reveal', (_, p: string) => shell.showItemInFolder(resolveUserPath(p)));
+
+// Settings > Data & Privacy. Everything Humatron knows lives in these tables; settings/API keys live in the store.
+const DATA_TABLES = ['memories', 'conversations', 'calendar_events', 'skills', 'missions', 'tool_calls'];
+const tableExists = (t: string) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(t);
+const counts = () => Object.fromEntries(DATA_TABLES.filter(tableExists).map(t => [t, (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as any).n]));
+
+// Export: a readable JSON file of all local data. API keys are never written out (memory vectors are dropped too).
+ipcMain.handle('data:export', async () => {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const r = await dialog.showSaveDialog(mainWindow!, {
+    title: 'Export Humatron data',
+    defaultPath: join(app.getPath('documents'), `Humatron-export-${stamp}.json`),
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (r.canceled || !r.filePath) return { canceled: true };
+  const data: Record<string, any> = {};
+  for (const t of DATA_TABLES.filter(tableExists)) {
+    data[t] = (db.prepare(`SELECT * FROM ${t} ORDER BY id`).all() as any[]).map(row => {
+      const { embedding, ...rest } = row;
+      for (const k of ['metadata', 'args', 'result', 'plan', 'steps']) {
+        if (typeof rest[k] === 'string') { try { rest[k] = JSON.parse(rest[k]); } catch {} }
+      }
+      return rest;
+    });
+  }
+  const settings = Object.fromEntries(Object.entries(store.store as Record<string, any>).filter(([k]) => !/apikey|key$/i.test(k)));
+  writeFileSync(r.filePath, JSON.stringify({ app: 'Humatron', exportedAt: new Date().toISOString(), counts: counts(), settings, data }, null, 2), 'utf8');
+  shell.showItemInFolder(r.filePath);
+  return { path: r.filePath, counts: counts() };
+});
+
+// Clear: wipes memories, chats, calendar, skills, missions and the tool log after a native confirmation.
+// API keys and settings stay, so Humatron keeps working; generated images in Pictures\Humatron are left alone.
+ipcMain.handle('data:clear', async () => {
+  const c = counts();
+  const r = await dialog.showMessageBox(mainWindow!, {
+    type: 'warning', title: 'Clear all data', buttons: ['Cancel', 'Delete everything'], defaultId: 0, cancelId: 0, noLink: true,
+    message: 'Delete everything Humatron has stored on this PC?',
+    detail: `${c.memories ?? 0} memories, ${c.conversations ?? 0} chat messages, ${c.calendar_events ?? 0} calendar events, ` +
+      `${c.skills ?? 0} skills, ${c.missions ?? 0} missions and the tool log will be permanently deleted.\n\n` +
+      'Your API keys and settings are kept. Tip: use Export Data first if you want a backup.',
+  });
+  if (r.response !== 1) return { canceled: true };
+  db.transaction(() => { for (const t of DATA_TABLES.filter(tableExists)) db.prepare(`DELETE FROM ${t}`).run(); })();
+  db.exec('VACUUM');
+  setTimeout(() => mainWindow?.webContents.reload(), 300);   // every page re-reads its (now empty) data
+  return { cleared: c };
+});
 
 // Calendar API
 ipcMain.handle('calendar:add', async (_, title: string, start: string, end?: string, description?: string) => {
@@ -524,7 +596,9 @@ ipcMain.handle('calendar:add', async (_, title: string, start: string, end?: str
 });
 
 ipcMain.handle('calendar:list', async (_, date: string) => {
-  const stmt = db.prepare('SELECT * FROM calendar_events WHERE date(start_time) = ? ORDER BY start_time');
+  // 'YYYY-MM' (calendar grid) lists the whole month, 'YYYY-MM-DD' a single day.
+  const where = String(date).length === 7 ? "strftime('%Y-%m', start_time) = ?" : 'date(start_time) = ?';
+  const stmt = db.prepare(`SELECT * FROM calendar_events WHERE ${where} ORDER BY start_time`);
   return stmt.all(date);
 });
 

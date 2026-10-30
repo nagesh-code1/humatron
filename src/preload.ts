@@ -30,7 +30,32 @@ contextBridge.exposeInMainWorld('api', {
     models: () => ipcRenderer.invoke('nebius:models'),
   },
   agent: {
-    chat: (text: string) => ipcRenderer.invoke('agent:chat', text),
+    chat: (text: string, opts?: object) => ipcRenderer.invoke('agent:chat', text, opts),
+  },
+  mission: {
+    start: (goal: string) => ipcRenderer.invoke('mission:start', goal),
+    cancel: (id: number) => ipcRenderer.invoke('mission:cancel', id),
+    list: () => ipcRenderer.invoke('mission:list'),
+    get: (id: number) => ipcRenderer.invoke('mission:get', id),
+    onEvent: (cb: (ev: any) => void) => {
+      const h = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on('mission:event', h);
+      return () => { ipcRenderer.removeListener('mission:event', h); };
+    },
+  },
+  voice: {
+    transcribe: (pcm: Float32Array) => ipcRenderer.invoke('voice:transcribe', pcm),
+  },
+  data: {
+    export: () => ipcRenderer.invoke('data:export'),
+    clear: () => ipcRenderer.invoke('data:clear'),
+  },
+  web: {
+    test: () => ipcRenderer.invoke('web:test'),
+  },
+  files: {
+    open: (path: string) => ipcRenderer.invoke('files:open', path),
+    reveal: (path: string) => ipcRenderer.invoke('files:reveal', path),
   },
   calendar: {
     add: (title: string, start: string, end?: string, description?: string) => ipcRenderer.invoke('calendar:add', title, start, end, description),

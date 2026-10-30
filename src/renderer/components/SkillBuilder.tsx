@@ -97,7 +97,7 @@ export function SkillBuilder() {
     <div className="panel">
       <div className="panel-header">
         <h1 className="panel-title">Skill Engine</h1>
-        <p className="panel-subtitle">Save, edit, and execute reusable workflows</p>
+        <p className="panel-subtitle">Teach Humatron a workflow once, run it with one click</p>
       </div>
 
       <div className="skills-list">

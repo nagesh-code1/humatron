@@ -13,7 +13,7 @@ export function CalendarPanel() {
   const loadEvents = async () => {
     try {
       // @ts-ignore
-      const dateStr = currentMonth.toISOString().split('T')[0].substring(0, 7);
+      const dateStr = localDate(currentMonth).substring(0, 7);
       const data = await window.api.calendar.list(dateStr);
       setEvents(data);
     } catch (e) {
@@ -46,7 +46,7 @@ export function CalendarPanel() {
     // Previous month days
     for (let i = firstDay - 1; i >= 0; i--) {
       const day = prevMonthDays - i;
-      const dateStr = new Date(year, month - 1, day).toISOString().split('T')[0];
+      const dateStr = localDate(new Date(year, month - 1, day));
       days.push({
         day,
         isCurrent: false,
@@ -58,7 +58,7 @@ export function CalendarPanel() {
     // Current month days
     const today = new Date();
     for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = new Date(year, month, d).toISOString().split('T')[0];
+      const dateStr = localDate(new Date(year, month, d));
       days.push({
         day: d,
         isCurrent: true,
@@ -70,7 +70,7 @@ export function CalendarPanel() {
     // Next month days to fill grid
     const totalCells = Math.ceil(days.length / 7) * 7;
     for (let d = 1; days.length < totalCells; d++) {
-      const dateStr = new Date(year, month + 1, d).toISOString().split('T')[0];
+      const dateStr = localDate(new Date(year, month + 1, d));
       days.push({
         day: d,
         isCurrent: false,
@@ -84,7 +84,7 @@ export function CalendarPanel() {
 
   const handleNewEvent = (date?: Date) => {
     const defaultDate = date || new Date();
-    const start = defaultDate.toISOString().slice(0, 16);
+    const start = `${localDate(defaultDate)}T${date ? '09:00' : defaultDate.toTimeString().slice(0, 5)}`;
     setEventForm({ title: '', start, end: '', description: '' });
     setShowModal(true);
   };
@@ -99,7 +99,7 @@ export function CalendarPanel() {
         <div className="calendar-header">
           <div>
             <h1 className="panel-title">{formatMonth(currentMonth)}</h1>
-            <p className="panel-subtitle">Manage your schedule</p>
+            <p className="panel-subtitle">Click any day to add an event — or just tell Humatron in chat</p>
           </div>
           <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
             <button className="icon-btn" onClick={() => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1))} title="Previous month">
@@ -120,7 +120,7 @@ export function CalendarPanel() {
                 <polyline points="9 18 15 12 9 6"/>
               </svg>
             </button>
-            <button className="btn btn-primary" onClick={handleNewEvent} style={{padding: '8px 16px', fontSize: '13px'}}>
+            <button className="btn btn-primary" onClick={() => handleNewEvent()} style={{padding: '8px 16px', fontSize: '13px'}}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight: '6px', verticalAlign: 'middle'}}>
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
@@ -213,4 +213,9 @@ export function CalendarPanel() {
       )}
     </div>
   );
+}
+
+// toISOString() is UTC, which shifts local dates a day back in IST; build YYYY-MM-DD from local parts instead.
+function localDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
