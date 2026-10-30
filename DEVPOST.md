@@ -74,7 +74,7 @@ nvidia-nemotron, nebius-token-factory, electron, react, typescript, vite, esbuil
 transformers.js, whisper, tavily, node.js
 
 ## Try it out
-- GitHub: https://github.com/<your-account>/humatron  *(fill in after pushing)*
+- GitHub: https://github.com/nagesh-code1/humatron
 - Run: `npm install && npm start`, then paste a Nebius Token Factory key in Settings.
 
 ## Video

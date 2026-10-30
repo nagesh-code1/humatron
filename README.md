@@ -53,7 +53,7 @@ Electron main ── better-sqlite3 (%APPDATA%\Humatron\humatron.db)
 Optional: a **Tavily** key for web research.
 
 ```bash
-git clone https://github.com/<your-account>/humatron.git
+git clone https://github.com/nagesh-code1/humatron.git
 cd humatron
 npm install
 npm start            # builds (node build.mjs) and launches Electron
