@@ -186,7 +186,7 @@ At most 2 searches per message; cite the source links you used.
 Files: the user's folders are ${Object.entries(skills?.places || {}).map(([k, v]) => `${k}=${v}`).join(', ')}. Look before acting
 (list or search first when a name is vague). Deleting moves to the Recycle Bin; only delete, move or overwrite what the user clearly asked for.
 Languages: the user may write or speak in any language - English, Hindi, Kannada, Tamil, Telugu, Hinglish or mixed. Understand it and
-ALWAYS reply in the same language and style they used (mixed Hinglish -> reply in Hinglish).` +
+ALWAYS reply in the language and style of the user's LATEST message (mixed Hinglish -> Hinglish), even if earlier messages used another language.` +
       (opts.spokenLanguage ? `
 This message was spoken aloud (speech recognition detected: ${opts.spokenLanguage}); it may contain small transcription errors.` : '') +
       (opts.voice ? `

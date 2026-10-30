@@ -10,7 +10,8 @@ import { transcribe } from './voice';
 
 // Same data folder in dev and in the packaged app: %APPDATA%/Humatron (memories, chats, settings stay on this PC)
 app.setName('Humatron');
-app.setPath('userData', join(app.getPath('appData'), 'Humatron'));
+// HUMATRON_DATA_DIR (QA only): run against a separate profile so screenshots/tests never touch the real data.
+app.setPath('userData', process.env.HUMATRON_DATA_DIR || join(app.getPath('appData'), 'Humatron'));
 
 // Initialize store
 const store = new Store({
@@ -139,6 +140,31 @@ function createWindow() {
     mainWindow.loadURL(devUrl);
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+  }
+
+  // HUMATRON_SHOTS=<steps.json>: QA screenshot tour. Each step {js?, waitFor?, timeout?, wait?, file} runs JS in the real UI,
+  // optionally waits until the `waitFor` expression is truthy, then saves the window as a PNG. Quits when done.
+  const shots = process.env.HUMATRON_SHOTS;
+  if (shots) {
+    mainWindow.webContents.once('did-finish-load', async () => {
+      const steps = JSON.parse(readFileSync(shots, 'utf8'));
+      const js = (code: string) => mainWindow!.webContents.executeJavaScript(code, true);
+      const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+      await sleep(2500);
+      for (const s of steps) {
+        try {
+          if (s.js) await js(s.js);
+          if (s.waitFor) {
+            const until = Date.now() + (s.timeout || 60000);
+            while (Date.now() < until && !(await js(s.waitFor))) await sleep(1000);
+          }
+          await sleep(s.wait ?? 1200);
+          writeFileSync(s.file, (await mainWindow!.webContents.capturePage()).toPNG());
+          console.log('[shots] saved', s.file);
+        } catch (e: any) { console.log('[shots] step failed', s.file, e.message); }
+      }
+      isQuitting = true; app.quit();
+    });
   }
 
   // HUMATRON_SELFTEST=<file.png>: render, screenshot the window to that file, print renderer errors, quit. Used for QA.
