@@ -18,7 +18,7 @@ const store = new Store({
     autoStart: false,
     globalHotkey: 'Alt+Space',
     nebiusApiKey: '',
-    model: 'nemotron-3-ultra',
+    provider: 'nvidia',   // free tier, no card; switch to nebius in Settings once credits arrive
   },
 });
 

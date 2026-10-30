@@ -1,19 +1,39 @@
 // Humatron agent: Nebius (Nemotron) client, local memory search, and the tool-calling chat loop.
 import type Database from 'better-sqlite3';
 
-// Nebius renamed AI Studio -> Token Factory; try the current host first, keep the old one as a fallback.
-const NEBIUS_HOSTS = ['https://api.tokenfactory.nebius.com/v1', 'https://api.studio.nebius.com/v1'];
+// OpenAI-compatible providers. Nebius = the hackathon target (renamed AI Studio -> Token Factory, both hosts kept);
+// NVIDIA / Gemini / Groq have free tiers with no card, so the app works before Nebius credits arrive.
+const BAD_MODEL = /reward|embed|rerank|safety|guard|vision|vl|parse|audio|tts|image|lite|preview|thinking|guard|whisper|retriever/i;
+// Rank Nemotron ids: Nemotron 3 Ultra first (the hackathon model), then 3.x Super/Lightning, then older generations.
+const rankNemotron = (ids: string[]) => {
+  const n = ids.filter(i => /nemotron/i.test(i) && !BAD_MODEL.test(i));
+  const score = (i: string) => (/nemotron-3[.-]/i.test(i) ? 0 : 10) + (/ultra/i.test(i) ? 0 : /super/i.test(i) ? 1 : /lightning|nano/i.test(i) ? 2 : 3);
+  return n.sort((a, b) => score(a) - score(b));
+};
+export const PROVIDERS: Record<string, { label: string, hosts: string[], keyField: string, pick: (ids: string[]) => string[] }> = {
+  nebius: { label: 'Nebius (Nemotron)', hosts: ['https://api.tokenfactory.nebius.com/v1', 'https://api.studio.nebius.com/v1'], keyField: 'nebiusApiKey',
+    pick: rankNemotron },
+  nvidia: { label: 'NVIDIA build (Nemotron, free)', hosts: ['https://integrate.api.nvidia.com/v1'], keyField: 'nvidiaApiKey',
+    pick: rankNemotron },
+  gemini: { label: 'Google Gemini (free)', hosts: ['https://generativelanguage.googleapis.com/v1beta/openai'], keyField: 'geminiApiKey',
+    pick: ids => { const n = ids.filter(i => /^gemini-/.test(i) && !BAD_MODEL.test(i)); return [...n.filter(i => /flash$/.test(i)).sort().reverse(), ...n]; } },
+  groq: { label: 'Groq (free, fast)', hosts: ['https://api.groq.com/openai/v1'], keyField: 'groqApiKey',
+    pick: ids => [...ids.filter(i => /llama-3\.3-70b-versatile/.test(i)), ...ids.filter(i => /70b/.test(i) && !BAD_MODEL.test(i)), ...ids.filter(i => !BAD_MODEL.test(i))] },
+};
 
 type Store = { get: (k: string) => any; set: (k: string, v: any) => void };
 type Embedder = (text: string) => Promise<Float32Array | null>;
 type ToolLog = { run: (name: string, args: unknown, result: unknown, ok: boolean) => unknown };
 
 export function createAgent(store: Store, db: Database.Database, embed: Embedder, toolLog: ToolLog) {
+  const provider = () => { const p = String(store.get('provider') || 'nvidia'); return PROVIDERS[p] ? p : 'nvidia'; };
+
   async function nebiusFetch(path: string, init: { method?: string, body?: string } = {}) {
-    const apiKey = String(store.get('nebiusApiKey') || '').trim();
-    if (!apiKey) throw new Error('Add your Nebius API key in Settings first.');
-    const saved = store.get('nebiusBaseUrl') as string | undefined;
-    const hosts = saved ? [saved, ...NEBIUS_HOSTS.filter(h => h !== saved)] : NEBIUS_HOSTS;
+    const prov = PROVIDERS[provider()];
+    const apiKey = String(store.get(prov.keyField) || '').trim();
+    if (!apiKey) throw new Error(`Add your ${prov.label} API key in Settings first.`);
+    const saved = store.get('baseUrl_' + provider()) as string | undefined;
+    const hosts = saved && prov.hosts.includes(saved) ? [saved, ...prov.hosts.filter(h => h !== saved)] : prov.hosts;
     let lastErr: any;
     for (const host of hosts) {
       let res: Response;
@@ -21,26 +41,39 @@ export function createAgent(store: Store, db: Database.Database, embed: Embedder
         res = await fetch(host + path, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` } });
       } catch (e: any) { lastErr = new Error(`Can't reach ${host}: ${e.message}`); continue; }   // DNS/network: try next host
       if (res.status === 404 && path === '/models') { lastErr = new Error(`404 at ${host}`); continue; }
-      if (!res.ok) throw new Error(`Nebius ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      if (host !== saved) store.set('nebiusBaseUrl', host);
+      if (!res.ok) throw new Error(`${prov.label} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      if (host !== saved) store.set('baseUrl_' + provider(), host);
       return res.json();
     }
     throw lastErr;
   }
 
-  // Pick a real Nemotron model id from the account's model list (prefer Ultra > Super > any Nemotron).
+  // Pick a real model id from the provider's model list (Nemotron on Nebius/NVIDIA), unless one was chosen in Settings.
   async function resolveModel(force = false): Promise<string> {
-    const chosen = String(store.get('model') || '');
-    if (chosen.includes('/') && !force) return chosen;          // a real "org/name" id picked in Settings
-    const cached = store.get('resolvedModel') as string | undefined;
+    const p = provider();
+    const chosen = String(store.get('model_' + p) || '');
+    if (chosen && chosen !== 'auto' && !force) return chosen;
+    const cached = store.get('resolvedModel_' + p) as string | undefined;
     if (cached && !force) return cached;
+    // A listed model isn't always deployed for this account (NVIDIA returns 404), so probe candidates until one answers.
+    const candidates = [...new Set(PROVIDERS[p].pick(await listModels()))].slice(0, 6);
+    let lastErr = '';
+    for (const model of candidates) {
+      try {
+        await nebiusFetch('/chat/completions', { method: 'POST', body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 8 }) });
+        store.set('resolvedModel_' + p, model);
+        return model;
+      } catch (e: any) {
+        lastErr = e.message;
+        if (/ 40[13]:/.test(lastErr)) throw e;               // bad key: no point trying other models
+      }
+    }
+    throw new Error(`No working model on ${PROVIDERS[p].label} (tried ${candidates.join(', ') || 'none'}). Last error: ${lastErr.slice(0, 200)}`);
+  }
+
+  async function listModels(): Promise<string[]> {
     const list = await nebiusFetch('/models');
-    const ids: string[] = (list.data || []).map((m: any) => m.id);
-    const nemo = ids.filter(id => /nemotron/i.test(id));
-    const pick = nemo.find(id => /ultra/i.test(id)) || nemo.find(id => /super/i.test(id)) || nemo[0];
-    if (!pick) throw new Error(`No Nemotron model on this Nebius account (${ids.length} models listed).`);
-    store.set('resolvedModel', pick);
-    return pick;
+    return (list.data || []).map((m: any) => String(m.id).replace(/^models\//, ''));
   }
 
   const stripThinking = (t: string) => t.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -135,7 +168,7 @@ Use tools: call "remember" whenever the user shares a lasting fact or preference
     }
     if (!reply) reply = used.length ? 'Done.' : '(no answer)';
     db.prepare('INSERT INTO conversations (role, content, metadata) VALUES (?, ?, ?)').run('assistant', reply, JSON.stringify({ tools: used, model }));
-    return { reply, tools: used, model };
+    return { reply, tools: used, model, provider: PROVIDERS[provider()].label };
   }
 
   // Settings "Test connection": a real inference round-trip with model + latency.
@@ -144,12 +177,12 @@ Use tools: call "remember" whenever the user shares a lasting fact or preference
     const t0 = Date.now();
     const r = await nebiusFetch('/chat/completions', { method: 'POST', body: JSON.stringify({
       model, messages: [{ role: 'user', content: 'Reply with exactly: HUMATRON ONLINE' }], max_tokens: 600, temperature: 0 }) });
-    return { model, host: store.get('nebiusBaseUrl'), ms: Date.now() - t0, reply: stripThinking(r.choices?.[0]?.message?.content || '') };
+    return { provider: PROVIDERS[provider()].label, model, ms: Date.now() - t0, reply: stripThinking(r.choices?.[0]?.message?.content || '') };
   }
 
   async function models() {
-    const list = await nebiusFetch('/models');
-    return (list.data || []).map((m: any) => m.id).filter((id: string) => /nemotron/i.test(id));
+    const p = provider(), ids = await listModels();
+    return p === 'nebius' || p === 'nvidia' ? ids.filter(i => /nemotron/i.test(i) && !BAD_MODEL.test(i)) : ids.filter(i => !BAD_MODEL.test(i));
   }
 
   return { chat, test, models, saveMemory, searchMemory, resolveModel, nebiusFetch, stripThinking };

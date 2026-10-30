@@ -1,8 +1,17 @@
 import React, { useState, useEffect } from 'react';
 
+// Must match PROVIDERS in src/agent.ts (keyField = where the key is stored, link = where to get one).
+const PROVIDERS: Record<string, { label: string, keyField: string, link: string, hint: string }> = {
+  nvidia: { label: 'NVIDIA build - Nemotron (free, no card)', keyField: 'nvidiaApiKey', link: 'https://build.nvidia.com', hint: 'Sign in, open any Nemotron model, "Get API Key" (starts with nvapi-).' },
+  gemini: { label: 'Google Gemini (free, no card)', keyField: 'geminiApiKey', link: 'https://aistudio.google.com/apikey', hint: 'Sign in with Google, "Create API key".' },
+  groq: { label: 'Groq (free, very fast)', keyField: 'groqApiKey', link: 'https://console.groq.com/keys', hint: 'Sign in, "Create API Key".' },
+  nebius: { label: 'Nebius Token Factory - Nemotron', keyField: 'nebiusApiKey', link: 'https://tokenfactory.nebius.com', hint: 'Needs Nebius credits (hackathon promo or card).' },
+};
+
 export function SettingsPanel() {
-  const [settings, setSettings] = useState({
-    nebiusApiKey: '',
+  const [settings, setSettings] = useState<Record<string, any>>({
+    provider: 'nvidia',
+    nvidiaApiKey: '', geminiApiKey: '', groqApiKey: '', nebiusApiKey: '',
     model: 'auto',
     autoStart: false,
     globalHotkey: 'Alt+Space',
@@ -10,10 +19,11 @@ export function SettingsPanel() {
   const [saved, setSaved] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [test, setTest] = useState<{ busy?: boolean, ok?: boolean, text?: string }>({});
+  const prov = PROVIDERS[settings.provider] || PROVIDERS.nvidia;
 
   const runTest = async () => {
     await handleSave();
-    setTest({ busy: true, text: 'Calling Nemotron on Nebius…' });
+    setTest({ busy: true, text: `Calling ${prov.label}…` });
     try {
       // @ts-ignore
       const r = await window.api.nebius.test();
@@ -31,16 +41,14 @@ export function SettingsPanel() {
 
   const loadSettings = async () => {
     try {
-      // @ts-ignore
-      const [apiKey, model, autoStart, hotkey] = await Promise.all([
-        window.api.store.get('nebiusApiKey'),
-        window.api.store.get('model'),
-        window.api.store.get('autoStart'),
-        window.api.store.get('globalHotkey'),
+      const get = (k: string) => window.api.store.get(k);
+      const provider = (await get('provider')) || 'nvidia';
+      const [nvidiaApiKey, geminiApiKey, groqApiKey, nebiusApiKey, model, autoStart, hotkey] = await Promise.all([
+        get('nvidiaApiKey'), get('geminiApiKey'), get('groqApiKey'), get('nebiusApiKey'), get('model_' + provider), get('autoStart'), get('globalHotkey'),
       ]);
       setSettings({
-        nebiusApiKey: apiKey || '',
-        model: model && String(model).includes('/') ? model : 'auto',
+        provider, nvidiaApiKey: nvidiaApiKey || '', geminiApiKey: geminiApiKey || '', groqApiKey: groqApiKey || '', nebiusApiKey: nebiusApiKey || '',
+        model: model || 'auto',
         autoStart: autoStart ?? false,
         globalHotkey: hotkey || 'Alt+Space',
       });
@@ -51,12 +59,13 @@ export function SettingsPanel() {
 
   const handleSave = async () => {
     try {
-      // @ts-ignore
+      const set = (k: string, v: any) => window.api.store.set(k, v);
       await Promise.all([
-        window.api.store.set('nebiusApiKey', settings.nebiusApiKey),
-        window.api.store.set('model', settings.model),
-        window.api.store.set('autoStart', settings.autoStart),
-        window.api.store.set('globalHotkey', settings.globalHotkey),
+        set('provider', settings.provider),
+        ...Object.values(PROVIDERS).map(p => set(p.keyField, String(settings[p.keyField] || '').trim())),
+        set('model_' + settings.provider, settings.model),
+        set('autoStart', settings.autoStart),
+        set('globalHotkey', settings.globalHotkey),
       ]);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -70,6 +79,11 @@ export function SettingsPanel() {
     setSaved(false);
   };
 
+  const changeProvider = async (provider: string) => {
+    const model = await window.api.store.get('model_' + provider);
+    setSettings(prev => ({ ...prev, provider, model: model || 'auto' }));
+    setModels([]); setTest({}); setSaved(false);
+  };
 
   return (
     <div className="panel" style={{maxWidth: '700px'}}>
@@ -79,20 +93,27 @@ export function SettingsPanel() {
       </div>
 
       <div className="settings-section">
-        <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: 'var(--fg)'}}>Nebius AI</h3>
-        
+        <h3 style={{fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: 'var(--fg)'}}>AI Brain</h3>
+
+        <div className="form-group">
+          <label className="form-label">Provider</label>
+          <select className="settings-input" value={settings.provider} onChange={e => changeProvider(e.target.value)} style={{maxWidth: '420px', cursor: 'pointer'}}>
+            {Object.entries(PROVIDERS).map(([id, p]) => <option key={id} value={id}>{p.label}</option>)}
+          </select>
+        </div>
+
         <div className="form-group">
           <label className="form-label">API Key</label>
           <input
             type="password"
             className="settings-input"
-            value={settings.nebiusApiKey}
-            onChange={e => handleChange('nebiusApiKey', e.target.value)}
-            placeholder="Paste your Nebius API key (stored only on this PC)"
+            value={settings[prov.keyField] || ''}
+            onChange={e => handleChange(prov.keyField, e.target.value)}
+            placeholder="Paste your API key (stored only on this PC)"
             style={{maxWidth: '500px'}}
           />
           <p style={{fontSize: '12px', color: 'var(--fg-muted)', marginTop: '6px'}}>
-            Get your key at <a href="https://studio.nebius.com" target="_blank" rel="noopener noreferrer" style={{color: 'var(--accent)'}}>studio.nebius.com</a>
+            Get a key at <a href={prov.link} target="_blank" rel="noopener noreferrer" style={{color: 'var(--accent)'}}>{prov.link.replace('https://', '')}</a> · {prov.hint}
           </p>
         </div>
 
@@ -102,15 +123,16 @@ export function SettingsPanel() {
             className="settings-input"
             value={settings.model}
             onChange={e => handleChange('model', e.target.value)}
-            style={{maxWidth: '300px', cursor: 'pointer'}}
+            style={{maxWidth: '420px', cursor: 'pointer'}}
           >
-            <option value="auto">Auto: best Nemotron on my account</option>
+            <option value="auto">Auto: best model for this provider</option>
+            {settings.model !== 'auto' && !models.includes(settings.model) && <option value={settings.model}>{settings.model}</option>}
             {models.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
 
         <div className="form-group">
-          <button className="btn btn-primary" onClick={runTest} disabled={test.busy || !settings.nebiusApiKey}>
+          <button className="btn btn-primary" onClick={runTest} disabled={test.busy || !settings[prov.keyField]}>
             {test.busy ? 'Testing…' : 'Save & test connection'}
           </button>
           {test.text && <p style={{fontSize: '13px', marginTop: '8px', color: test.ok ? '#5eead4' : test.busy ? 'var(--fg-muted)' : '#fca5a5'}}>{test.text}</p>}

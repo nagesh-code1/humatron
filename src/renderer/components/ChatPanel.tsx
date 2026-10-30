@@ -103,7 +103,7 @@ export function ChatPanel() {
     <div className="panel chat-panel">
       <div className="panel-header">
         <h1 className="panel-title">Chat</h1>
-        <p className="panel-subtitle">NVIDIA Nemotron on Nebius · memory + calendar tools · data stays on this PC</p>
+        <p className="panel-subtitle">Nemotron · Gemini · Groq · memory + calendar tools · data stays on this PC</p>
       </div>
 
       <div className="messages" role="log" aria-live="polite">
